@@ -15,12 +15,10 @@ const ALPHABET = "AĄBCĆDEĘFGHIJKLŁMNŃOÓPRSŚTUWYZŹŻQXV";
 const current = PHRASES[Math.floor(Math.random() * PHRASES.length)];
 let guessedLetters = [];
 let flashLetters = [];
-let solveMode = false;
+let audioContext = null;
 
 const board = document.getElementById("board");
 const categoryName = document.getElementById("categoryName");
-const overlay = document.getElementById("solveOverlay");
-const solveInput = document.getElementById("solveInput");
 
 function normalizeLetter(value) {
   return value
@@ -28,16 +26,6 @@ function normalizeLetter(value) {
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/Ł/g, "L");
-}
-
-function normalizePhrase(value) {
-  return value
-    .toUpperCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/Ł/g, "L")
-    .replace(/\s+/g, " ")
-    .trim();
 }
 
 function splitToRows(phrase) {
@@ -73,6 +61,42 @@ function createBoardRows(phrase) {
       ...chars.map((char) => (char === " " ? { kind: "space" } : { kind: "letter", char })),
       ...Array.from({ length: rightPad }, () => ({ kind: "empty" }))
     ];
+  });
+}
+
+function ensureAudio() {
+  if (!audioContext) {
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx) return null;
+    audioContext = new AudioCtx();
+  }
+
+  if (audioContext.state === "suspended") {
+    audioContext.resume();
+  }
+
+  return audioContext;
+}
+
+function playTone(type) {
+  const ctx = ensureAudio();
+  if (!ctx) return;
+
+  const gain = ctx.createGain();
+  gain.gain.setValueAtTime(0.0001, ctx.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.08, ctx.currentTime + 0.01);
+  gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + (type === "success" ? 0.22 : 0.3));
+  gain.connect(ctx.destination);
+
+  const tones = type === "success" ? [740, 987] : [220, 165];
+
+  tones.forEach((frequency) => {
+    const osc = ctx.createOscillator();
+    osc.type = type === "success" ? "triangle" : "sawtooth";
+    osc.frequency.setValueAtTime(frequency, ctx.currentTime);
+    osc.connect(gain);
+    osc.start(ctx.currentTime);
+    osc.stop(ctx.currentTime + (type === "success" ? 0.22 : 0.3));
   });
 }
 
@@ -144,59 +168,20 @@ function handleLetter(key) {
   guessedLetters.push(letter);
 
   if (hits > 0) {
+    playTone("success");
     pulseLetter(letter);
   } else {
+    playTone("fail");
     renderBoard();
   }
-}
-
-function openSolveMode() {
-  solveMode = true;
-  overlay.classList.remove("hidden");
-  solveInput.value = "";
-  window.setTimeout(() => solveInput.focus(), 10);
-}
-
-function closeSolveMode() {
-  solveMode = false;
-  overlay.classList.add("hidden");
-  solveInput.value = "";
-}
-
-function submitSolve() {
-  const guess = normalizePhrase(solveInput.value);
-  if (!guess) {
-    closeSolveMode();
-    return;
-  }
-
-  if (guess === normalizePhrase(current.phrase)) {
-    revealAllLetters();
-    renderBoard();
-  }
-
-  closeSolveMode();
 }
 
 document.addEventListener("keydown", (event) => {
-  if (solveMode) {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      closeSolveMode();
-      return;
-    }
-
-    if (event.key === "Enter") {
-      event.preventDefault();
-      submitSolve();
-    }
-
-    return;
-  }
-
   if (event.key === "/") {
     event.preventDefault();
-    openSolveMode();
+    revealAllLetters();
+    playTone("success");
+    renderBoard();
     return;
   }
 
@@ -205,22 +190,8 @@ document.addEventListener("keydown", (event) => {
   }
 });
 
-solveInput.addEventListener("keydown", (event) => {
-  if (event.key === "Enter") {
-    event.preventDefault();
-    submitSolve();
-  }
-
-  if (event.key === "Escape") {
-    event.preventDefault();
-    closeSolveMode();
-  }
-});
-
-overlay.addEventListener("click", (event) => {
-  if (event.target === overlay) {
-    closeSolveMode();
-  }
-});
+document.addEventListener("pointerdown", () => {
+  ensureAudio();
+}, { once: true });
 
 renderBoard();
